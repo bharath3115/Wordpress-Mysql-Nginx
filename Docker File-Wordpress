@@ -1,0 +1,106 @@
+Use-case
+The containers will be created using Dockerfile. Dockerfiles are the easiest way to configure images, which will be further used to create the containers. Dockerfile can be created on any location. They do not require a specific path or folder structure to be followed. Here we will be using ~/docker/mysql for MySQL Dockerfile and ~/docker/apache for Apache Dockerfile.
+
+Mysql Dockerfile
+The Dockerfile used in this article is as below:-
+
+[js]FROM dockerttnd/mysqlinfra:2.0
+MAINTAINER AS Support rahul.jaiswal@tothenew.com
+ADD my.cnf /etc/mysql/
+ADD mysql.sh /
+RUN chmod +x mysql.sh
+ADD setup.sql /
+ADD run.sh /
+RUN chmod +x run.sh
+Expose 3306
+CMD [&amp;quot;/run.sh&amp;quot;]
+[/js]
+
+Details regarding the options used in above Dockerfile :-
+
+1. FROM : This specifies the base image from which the MySQL image will be built and further customized. The “dockerttnd/mysqlinfra:2.0” image will be automatically downloaded. This image has MySQL installed on the container.
+2. MAINTAINER AS : This specifies the maintainer/creator of the images created by the above docker file.
+3. ADD: my.cnf /etc/mysql/ : ADD option adds the files required for configuration. Here we are providing our my.cnf to be used by MySQL instance. You can use your own my.cnf. The my.cnf is added to /etc/mysql/ location using the above command.
+4. ADD mysql.sh : Now, we are adding mysql.sh to the final container. This script contains post install configurations to be applied. The mysql.sh script is as below :-
+
+[js]#!/bin/bash
+set -x
+exec &amp;amp;amp;&amp;amp;gt; test.txt
+mysql_install_db &amp;amp;amp;
+sleep 5
+/usr/bin/mysqld_safe &amp;amp;
+sleep 6
+/usr/bin/mysql -uroot &amp;amp;gt;test.txt
+/bin/bash [/js]
+
+5. RUN chmod +x mysql.sh : In this step we are setting up permissions for mysql.sh to executable.
+6. ADD setup.sql / : This file contains DB and user settings which will be used by the Apache image to connect to MySQL container.
+
+[js]
+&amp;lt;pre&amp;gt;&amp;lt;pre&amp;gt;use mysql;
+create database wordpress;
+grant all on wordpress.* to ‘wordpress1’@’privateipofapachehost’ identified by ‘password’;
+flush privileges;[/js]
+
+privateipofapachehost is the private IP of host server on which Apache container will be running.
+7. ADD run.sh / : Adding the run.sh script which will be our entry point script for initiating the configurations for MySQL container.
+
+[js]#!/bin/bash
+/mysql.sh &amp;gt; test.txt [/js]
+
+8. RUN chmod +x run.sh : Setting the permissions for run.sh script to executable.
+9. Expose 3306 : Exposing the MySQL port of the MySQL container to the host server.
+10. CMD [“/run.sh”] : CMD command sets the initial command/script which will be called when our container is started.
+
+The MySQL container Dockerfile is complete.
+
+Now, we need to create the image using the above Dockerfile. The following image will be used to create MySQL container :-
+1. Build the image using the above Dockerfile.
+
+[js]docker build -t mysql ~/docker/mysql/. [/js]
+
+2. Create the container using MySQL image built using the above command.
+
+[shell]docker run -itd –restart=always –name mysqldb -v /data/mysql:/var/lib/mysql -p 3306:3306 mysql[/shell]
+
+Explanation of above options :-
+
+1. –restart : This option specifies the restart policies for the container. The restart policy has three options:-
+no= Do not restart container on exit [default].
+on-failure= restart only if container exits with non-zero exit status.
+always=always restart container if the container is not running.
+2. -v : This option mounts the host directory to container.
+3. -p 3306:3306 : The -p 3306:3306 parameter in the docker run command maps the default MySQL port (3306) of the container with the IP of the host server, so that the Apache web container created in the further steps is able to connect to the database server.
+
+The MySQL container is up now. The same can be verified by using command  docker ps.
+
+Now, let’s create the Apache web container on the other server.
+
+Apache Server Docker file
+[js]FROM ubuntu:latest
+RUN apt-get update
+RUN apt-get -y install apache2 php5 php5-mysql
+RUN cd /var/www
+RUN apt-get install wget -y
+RUN wget http://wordpress.org/latest.tar.gz
+RUN tar -xzvf latest.tar.gz -C /var/www/
+RUN cp /var/www/wordpress/wp-config-sample.php /var/www/wordpress/wp-config.php
+RUN sed -i ‘s/database_name_here/wordpress/’ /var/www/wordpress/wp-config.php
+RUN sed -i ‘s/username_here/wordpress1/’ /var/www/wordpress/wp-config.php
+RUN sed -i ‘s/password_here/password/’ /var/www/wordpress/wp-config.php
+RUN sed -i &amp;quot;s/localhost/ip of the host server of mysql container/g&amp;quot; wordpress/wp-config.php &amp;lt;em&amp;gt;//***&amp;lt;/em&amp;gt;
+RUN cd /etc/apache2/sites-enabled/
+RUN sed -i ‘s/\/var\/www\/html/\/var\/www\/wordpress/’ /etc/apache2/sites-enabled/000-default.conf
+CMD [&amp;quot;apache2ctl&amp;quot; ,&amp;quot; -DFOREGROUND&amp;quot;] [/js]
+
+** ip must be the private ip of the host server of containing the mysql container.
+
+Now, let’s build the image similar to as we build MySQL image with Dockerfile :-
+
+[js]docker build -t apache ~/docker/apache/.[/js]
+
+Running the apache container :-
+
+[js]docker run –itd –restart=always –name web -p 80:80 apache [/js]
+
+Now, the setup is up. We can test the setup by browsing the public IP of the Apache container.
